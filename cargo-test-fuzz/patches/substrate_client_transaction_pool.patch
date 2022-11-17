@@ -1,24 +1,24 @@
 diff --git a/client/transaction-pool/Cargo.toml b/client/transaction-pool/Cargo.toml
-index 3fdcde48d9..8ccc3e07f9 100644
+index 0bdfb62..12745e7 100644
 --- a/client/transaction-pool/Cargo.toml
 +++ b/client/transaction-pool/Cargo.toml
-@@ -20,6 +20,6 @@ linked-hash-map = "0.5.4"
+@@ -21,6 +21,6 @@ linked-hash-map = "0.5.4"
  log = "0.4.17"
- parity-util-mem = { version = "0.11.0", default-features = false, features = ["primitive-types"] }
--parking_lot = "0.12.0"
+ parity-util-mem = { version = "0.12.0", default-features = false, features = ["primitive-types"] }
+-parking_lot = "0.12.1"
 -serde = { version = "1.0.136", features = ["derive"] }
 +parking_lot = { version = "0.12.0", features = ["serde"] }
 +serde = { version = "1.0.136", features = ["derive", "rc"] }
  thiserror = "1.0.30"
  prometheus-endpoint = { package = "substrate-prometheus-endpoint", version = "0.10.0-dev", path = "../../utils/prometheus" }
-@@ -33,4 +33,5 @@ sp-runtime = { version = "6.0.0", path = "../../primitives/runtime" }
+@@ -34,4 +34,5 @@ sp-runtime = { version = "6.0.0", path = "../../primitives/runtime" }
  sp-tracing = { version = "5.0.0", path = "../../primitives/tracing" }
  sp-transaction-pool = { version = "4.0.0-dev", path = "../../primitives/transaction-pool" }
 +test-fuzz = { path = "../../../../test-fuzz" }
  
  [dev-dependencies]
 diff --git a/client/transaction-pool/src/graph/base_pool.rs b/client/transaction-pool/src/graph/base_pool.rs
-index 8e0422739c..af1b2c5ae3 100644
+index 8e04227..af1b2c5 100644
 --- a/client/transaction-pool/src/graph/base_pool.rs
 +++ b/client/transaction-pool/src/graph/base_pool.rs
 @@ -85,5 +85,5 @@ pub struct PruneStatus<Hash, Ex> {
@@ -47,7 +47,7 @@ index 8e0422739c..af1b2c5ae3 100644
  	/// Create new pool given reject_future_transactions flag.
  	pub fn new(reject_future_transactions: bool) -> Self {
 diff --git a/client/transaction-pool/src/graph/future.rs b/client/transaction-pool/src/graph/future.rs
-index ae49e3f2d3..4f7f4bf189 100644
+index ae49e3f..4f7f4bf 100644
 --- a/client/transaction-pool/src/graph/future.rs
 +++ b/client/transaction-pool/src/graph/future.rs
 @@ -29,5 +29,5 @@ use std::time::Instant;
@@ -64,7 +64,7 @@ index ae49e3f2d3..4f7f4bf189 100644
  	pub imported_at: Instant,
  }
 diff --git a/client/transaction-pool/src/graph/ready.rs b/client/transaction-pool/src/graph/ready.rs
-index 220e69b13e..79bce8a93c 100644
+index 220e69b..79bce8a 100644
 --- a/client/transaction-pool/src/graph/ready.rs
 +++ b/client/transaction-pool/src/graph/ready.rs
 @@ -38,5 +38,5 @@ use super::{
@@ -143,7 +143,7 @@ index 220e69b13e..79bce8a93c 100644
  		ready: &mut ReadyTransactions<H, Ex>,
  		tx: Transaction<H, Ex>,
 diff --git a/client/transaction-pool/src/graph/tracked_map.rs b/client/transaction-pool/src/graph/tracked_map.rs
-index 32d04b0068..3691ef0ffb 100644
+index 32d04b0..3691ef0 100644
 --- a/client/transaction-pool/src/graph/tracked_map.rs
 +++ b/client/transaction-pool/src/graph/tracked_map.rs
 @@ -34,6 +34,9 @@ pub trait Size {
@@ -202,20 +202,24 @@ index 32d04b0068..3691ef0ffb 100644
  	/// Clone the inner map.
  	pub fn clone_map(&self) -> HashMap<K, V> {
 diff --git a/primitives/runtime/src/transaction_validity.rs b/primitives/runtime/src/transaction_validity.rs
-index 7cc8b70df9..02e5c1ff9c 100644
+index 4646808..e8e6cc0 100644
 --- a/primitives/runtime/src/transaction_validity.rs
 +++ b/primitives/runtime/src/transaction_validity.rs
-@@ -230,4 +230,5 @@ impl From<UnknownTransaction> for TransactionValidity {
- 	Copy, Clone, PartialEq, Eq, Encode, Decode, RuntimeDebug, parity_util_mem::MallocSizeOf,
- )]
-+#[cfg_attr(feature = "std", derive(serde::Deserialize, serde::Serialize))]
+@@ -228,5 +228,8 @@ impl From<UnknownTransaction> for TransactionValidity {
+ /// by our local node (for instance off-chain workers).
+ #[derive(Copy, Clone, PartialEq, Eq, Encode, Decode, RuntimeDebug)]
+-#[cfg_attr(feature = "std", derive(parity_util_mem::MallocSizeOf))]
++#[cfg_attr(
++	feature = "std",
++	derive(parity_util_mem::MallocSizeOf, serde::Deserialize, serde::Serialize)
++)]
  pub enum TransactionSource {
  	/// Transaction is already included in block.
 diff --git a/test-utils/runtime/src/lib.rs b/test-utils/runtime/src/lib.rs
-index aa436f1ad2..9882e68228 100644
+index 8bda4ea..64f296f 100644
 --- a/test-utils/runtime/src/lib.rs
 +++ b/test-utils/runtime/src/lib.rs
-@@ -185,5 +185,5 @@ impl<'a> serde::Deserialize<'a> for Extrinsic {
+@@ -186,5 +186,5 @@ impl<'a> serde::Deserialize<'a> for Extrinsic {
  		D: serde::Deserializer<'a>,
  	{
 -		let r = sp_core::bytes::deserialize(de)?;

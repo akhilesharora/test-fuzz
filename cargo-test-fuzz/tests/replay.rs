@@ -8,7 +8,7 @@ use testing::{examples, retry};
 // smoelius: MEMORY_LIMIT must be large enough for the build process to complete.
 const MEMORY_LIMIT: u64 = 1024 * 1024 * 1024;
 
-const TIMEOUT: &str = "120";
+const TIMEOUT: &str = "240";
 
 #[derive(Clone, Copy)]
 enum Object {
@@ -32,7 +32,7 @@ fn replay_crashes() {
             &format!("{}", MEMORY_LIMIT / 1024),
         ],
         Object::Crashes,
-        r"(?m)\bmemory allocation of \d{10,} bytes failed$",
+        r"(?m)\bmemory allocation of \d{10,} bytes failed$|\bcapacity overflow\b",
     );
 }
 
@@ -60,13 +60,13 @@ fn replay(krate: &str, target: &str, fuzz_args: &[&str], object: Object, re: &st
         dylint_lib = "non_thread_safe_call_in_test",
         allow(non_thread_safe_call_in_test)
     )]
-    remove_dir_all(&corpus).unwrap_or_default();
+    remove_dir_all(corpus).unwrap_or_default();
 
     examples::test(krate, "test").unwrap().assert().success();
 
     examples::test_fuzz(krate, target)
         .unwrap()
-        .args(&["--reset"])
+        .args(["--reset"])
         .assert()
         .success();
 
@@ -86,7 +86,7 @@ fn replay(krate: &str, target: &str, fuzz_args: &[&str], object: Object, re: &st
         let mut command = examples::test_fuzz(krate, target).unwrap();
 
         command
-            .args(&[match object {
+            .args([match object {
                 Object::Crashes => "--replay=crashes",
                 Object::Hangs => "--replay=hangs",
             }])

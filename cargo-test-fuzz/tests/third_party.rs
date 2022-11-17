@@ -1,97 +1,95 @@
 use assert_cmd::Command;
 use bitflags::bitflags;
+use cargo_metadata::MetadataCommand;
+use lazy_static::lazy_static;
+use option_set::option_set;
 use predicates::prelude::*;
+use regex::Regex;
 use rustc_version::{version_meta, Channel};
+use serde::Deserialize;
 use std::{
     fs::{read_to_string, OpenOptions},
-    io::Write,
+    io::{stderr, Write},
     path::Path,
 };
 use tempfile::tempdir_in;
 use test_log::test;
 
-bitflags! {
-    struct Flags: u8 {
+option_set! {
+    struct Flags: UpperSnake + u8 {
         const EXPENSIVE = 0b0000_0001;
         const REQUIRES_ISOLATION = 0b0000_0010;
         const SKIP_NIGHTLY = 0b0000_0100;
     }
 }
 
-struct Test<'a> {
+#[derive(Deserialize)]
+struct Test {
     flags: Flags,
-    url: &'a str,
-    patch: &'a str,
-    subdir: &'a str,
-    package: &'a str,
+    url: String,
+    patch: String,
+    subdir: String,
+    package: String,
+    targets: Vec<String>,
 }
 
-const TESTS: &[Test] = &[
-    Test {
-        flags: Flags::EXPENSIVE,
-        url: "https://github.com/paritytech/substrate",
-        patch: "substrate_client_transaction_pool.patch",
-        subdir: ".",
-        package: "sc-transaction-pool",
-    },
-    // smoelius: Disable this test for now: https://github.com/solana-labs/solana/issues/25474
-    /* Test {
-        // https://github.com/bitflags/bitflags/issues/180#issuecomment-499302965
-        flags: Flags::from_bits_truncate(
-            Flags::REQUIRES_ISOLATION.bits() | Flags::SKIP_NIGHTLY.bits(),
-        ),
-        url: "https://github.com/solana-labs/example-helloworld",
-        patch: "example-helloworld.patch",
-        subdir: "src/program-rust",
-        package: "solana-bpf-helloworld",
-    }, */
-    Test {
-        flags: Flags::EXPENSIVE,
-        url: "https://github.com/solana-labs/solana",
-        patch: "solana.patch",
-        subdir: ".",
-        package: "solana-bpf-loader-program",
-    },
-    Test {
-        flags: Flags::empty(),
-        url: "https://github.com/substrate-developer-hub/substrate-node-template",
-        patch: "substrate_node_template.patch",
-        subdir: ".",
-        package: "pallet-template",
-    },
-];
+lazy_static! {
+    static ref TESTS: Vec<Test> = {
+        let content =
+            read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("third_party.json")).unwrap();
+        serde_json::from_str(&content).unwrap()
+    };
+}
 
 // smoelius: This should match `scripts/update_patches.sh`.
 const LINES_OF_CONTEXT: u32 = 2;
 
-#[test]
-fn cheap_tests() {
-    let version_meta = version_meta().unwrap();
-    TESTS
-        .iter()
-        .filter(|test| {
-            !test.flags.contains(Flags::EXPENSIVE)
-                && (!test.flags.contains(Flags::SKIP_NIGHTLY)
-                    || version_meta.channel != Channel::Nightly)
-        })
-        .for_each(run_test);
+mod cheap_tests {
+    use super::{test, *};
+    #[test]
+    fn test() {
+        let version_meta = version_meta().unwrap();
+        for test in TESTS.iter() {
+            run_test(
+                module_path!(),
+                test,
+                test.flags.contains(Flags::EXPENSIVE)
+                    || (test.flags.contains(Flags::SKIP_NIGHTLY)
+                        && version_meta.channel == Channel::Nightly),
+            );
+        }
+    }
 }
 
-#[test]
-#[ignore]
-fn expensive_tests() {
-    let version_meta = version_meta().unwrap();
-    TESTS
-        .iter()
-        .filter(|test| {
-            test.flags.contains(Flags::EXPENSIVE)
-                && (!test.flags.contains(Flags::SKIP_NIGHTLY)
-                    || version_meta.channel != Channel::Nightly)
-        })
-        .for_each(run_test);
+mod all_tests {
+    use super::{test, *};
+    #[test]
+    #[ignore]
+    fn test() {
+        let version_meta = version_meta().unwrap();
+        for test in TESTS.iter() {
+            run_test(
+                module_path!(),
+                test,
+                test.flags.contains(Flags::SKIP_NIGHTLY)
+                    && version_meta.channel == Channel::Nightly,
+            );
+        }
+    }
 }
 
-fn run_test(test: &Test) {
+fn run_test(module_path: &str, test: &Test, partial: bool) {
+    let (_, module) = module_path.split_once("::").unwrap();
+    #[allow(clippy::explicit_write)]
+    writeln!(
+        stderr(),
+        "{}: {}{}",
+        module,
+        test.url,
+        if partial { " (partial)" } else { "" }
+    )
+    .unwrap();
+
     // smoelius: Each patch expects test-fuzz to be an ancestor of the directory in which the patch
     // is applied.
     #[allow(unknown_lints)]
@@ -99,8 +97,8 @@ fn run_test(test: &Test) {
     let tempdir = tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
 
     Command::new("git")
-        .current_dir(tempdir.path())
-        .args(&["clone", test.url, "."])
+        .current_dir(&tempdir)
+        .args(["clone", &test.url, "."])
         .assert()
         .success();
 
@@ -108,17 +106,17 @@ fn run_test(test: &Test) {
     #[allow(env_cargo_path)]
     let patch = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("patches")
-        .join(test.patch)
+        .join(&test.patch)
         .canonicalize()
         .unwrap();
 
     Command::new("git")
-        .current_dir(tempdir.path())
-        .args(&["apply", &patch.to_string_lossy()])
+        .current_dir(&tempdir)
+        .args(["apply", &patch.to_string_lossy()])
         .assert()
         .success();
 
-    let subdir = tempdir.path().join(test.subdir);
+    let subdir = tempdir.path().join(&test.subdir);
 
     if test.flags.contains(Flags::REQUIRES_ISOLATION) {
         let mut file = OpenOptions::new()
@@ -136,64 +134,120 @@ fn run_test(test: &Test) {
     // incompatible with `syn:1.0.84`.
     Command::new("cargo")
         .current_dir(&subdir)
-        .args(&["update"])
+        .args(["update"])
         .assert()
         .success();
+
+    check_test_fuzz_dependency(&subdir, &test.package);
+
+    if partial {
+        return;
+    }
 
     Command::new("cargo")
         .current_dir(&subdir)
-        .args(&["test", "--package", test.package, "--", "--nocapture"])
+        .args(["test", "--package", &test.package, "--", "--nocapture"])
         .assert()
         .success();
 
-    Command::cargo_bin("cargo-test-fuzz")
-        .unwrap()
-        .current_dir(&subdir)
-        .args(&["test-fuzz", "--package", test.package, "--display=corpus"])
-        .assert()
-        .success()
-        .stdout(predicate::str::is_match(r#"(?m)^[[:xdigit:]]{40}:"#).unwrap());
+    for target in &test.targets {
+        Command::cargo_bin("cargo-test-fuzz")
+            .unwrap()
+            .current_dir(&subdir)
+            .args([
+                "test-fuzz",
+                "--package",
+                &test.package,
+                "--display=corpus",
+                target,
+            ])
+            .assert()
+            .success()
+            .stdout(predicate::str::is_match(r#"(?m)^[[:xdigit:]]{40}:"#).unwrap());
 
-    Command::cargo_bin("cargo-test-fuzz")
-        .unwrap()
-        .current_dir(&subdir)
-        .args(&["test-fuzz", "--package", test.package, "--replay=corpus"])
-        .assert()
-        .success()
-        .stdout(predicate::str::is_match(r#"(?m)^[[:xdigit:]]{40}: Ret\(Ok\(.*\)\)$"#).unwrap());
+        Command::cargo_bin("cargo-test-fuzz")
+            .unwrap()
+            .current_dir(&subdir)
+            .args([
+                "test-fuzz",
+                "--package",
+                &test.package,
+                "--replay=corpus",
+                target,
+            ])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::is_match(r#"(?m)^[[:xdigit:]]{40}: Ret\((Ok|Err)\(.*\)\)$"#)
+                    .unwrap(),
+            );
+    }
+}
+
+fn check_test_fuzz_dependency(subdir: &Path, test_package: &str) {
+    let metadata = MetadataCommand::new()
+        .current_dir(subdir)
+        .no_deps()
+        .exec()
+        .unwrap();
+    let package = metadata
+        .packages
+        .iter()
+        .find(|package| package.name == test_package)
+        .unwrap_or_else(|| panic!("Could not find package `{}`", test_package));
+    let dep = package
+        .dependencies
+        .iter()
+        .find(|dep| dep.name == "test-fuzz")
+        .expect("Could not find dependency `test-fuzz`");
+    assert!(dep.path.is_some());
 }
 
 #[test]
 fn patches_are_current() {
-    for test in TESTS {
+    let re = Regex::new(r#"^index [[:xdigit:]]{7}\.\.[[:xdigit:]]{7} [0-7]{6}$"#).unwrap();
+
+    for test in TESTS.iter() {
         let tempdir = tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
 
         Command::new("git")
-            .current_dir(tempdir.path())
-            .args(&["clone", test.url, "."])
+            .current_dir(&tempdir)
+            .args(["clone", "--depth=1", &test.url, "."])
             .assert()
             .success();
 
         let patch_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("patches")
-            .join(test.patch);
+            .join(&test.patch);
         let patch = read_to_string(patch_path).unwrap();
 
         Command::new("git")
-            .current_dir(tempdir.path())
-            .args(&["apply"])
+            .current_dir(&tempdir)
+            .args(["apply"])
             .write_stdin(patch.as_bytes())
             .assert()
             .success();
 
+        // smoelius: The following checks are *not* redundant. They can fail even if the patch
+        // applies.
+
         let assert = Command::new("git")
-            .current_dir(tempdir.path())
-            .args(&["diff", &format!("--unified={}", LINES_OF_CONTEXT)])
+            .current_dir(&tempdir)
+            .args(["diff", &format!("--unified={LINES_OF_CONTEXT}")])
             .assert()
             .success();
 
         let diff = String::from_utf8_lossy(&assert.get_output().stdout);
 
-        assert_eq!(patch, diff);
+        let patch_lines = patch.lines().collect::<Vec<_>>();
+        let diff_lines = diff.lines().collect::<Vec<_>>();
+
+        assert_eq!(patch_lines.len(), diff_lines.len());
+
+        for (patch_line, diff_line) in patch_lines.into_iter().zip(diff_lines) {
+            if !(re.is_match(patch_line) && re.is_match(diff_line)) {
+                assert_eq!(patch_line, diff_line);
+            }
+        }
     }
 }

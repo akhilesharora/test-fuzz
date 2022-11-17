@@ -8,7 +8,7 @@ const SERDE_DEFAULT: &str = "bincode";
 #[test]
 fn link() {
     Command::new("cargo")
-        .args(&[
+        .args([
             "build",
             "--manifest-path",
             &MANIFEST_PATH,
@@ -25,9 +25,8 @@ fn link() {
 
     // smoelius: https://stackoverflow.com/questions/7219845/difference-between-nm-and-objdump
     Command::new("nm")
-        .args(&[&target_directory(false)
-            .join("debug")
-            .join("hello-world")
+        .args([target_directory(false)
+            .join("debug/hello-world")
             .to_string_lossy()
             .to_string()])
         .assert()

@@ -8,13 +8,14 @@ name: Update dependencies
 on:
   schedule:
     - cron: "0 3 * * 5"
+  workflow_dispatch:
 
 jobs:
   update:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
         with:
           # https://github.com/peter-evans/create-pull-request/blob/main/docs/concepts-guidelines.md#triggering-further-workflow-runs
           # https://github.com/peter-evans/create-pull-request/blob/main/docs/concepts-guidelines.md#push-using-ssh-deploy-keys
@@ -25,12 +26,11 @@ jobs:
 
       - name: Update dependencies
         run: |
-          # smoelius: AFL should not be updated.
-          AFL="$(grep '^afl\>.*$' test-fuzz/Cargo.toml)"
-          find . -name Cargo.toml -exec cargo upgrade --workspace --manifest-path={} \;
-          sed -i "s/^afl\>.*$/$AFL/" test-fuzz/Cargo.toml
+          cargo update
+          cargo upgrade
 
       - name: Create pull request
-        uses: peter-evans/create-pull-request@v3
+        uses: peter-evans/create-pull-request@v4
         with:
           title: "Update dependencies"
+          token: ${{ secrets.PR_GITHUB_TOKEN }}

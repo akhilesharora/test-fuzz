@@ -33,23 +33,17 @@ pub fn corpus_directory_from_target(krate: &str, target: &str) -> PathBuf {
 
 #[must_use]
 pub fn crashes_directory_from_target(krate: &str, target: &str) -> PathBuf {
-    output_directory_from_target(krate, target)
-        .join("default")
-        .join("crashes")
+    output_directory_from_target(krate, target).join("default/crashes")
 }
 
 #[must_use]
 pub fn hangs_directory_from_target(krate: &str, target: &str) -> PathBuf {
-    output_directory_from_target(krate, target)
-        .join("default")
-        .join("hangs")
+    output_directory_from_target(krate, target).join("default/hangs")
 }
 
 #[must_use]
 pub fn queue_directory_from_target(krate: &str, target: &str) -> PathBuf {
-    output_directory_from_target(krate, target)
-        .join("default")
-        .join("queue")
+    output_directory_from_target(krate, target).join("default/queue")
 }
 
 #[must_use]
@@ -83,7 +77,7 @@ pub fn target_directory(instrumented: bool) -> PathBuf {
     if let Ok(path) = env::var("TEST_FUZZ_MANIFEST_PATH") {
         command.manifest_path(path);
     }
-    let mut target_dir = command.exec().unwrap().target_directory;
+    let mut target_dir = command.no_deps().exec().unwrap().target_directory;
     if instrumented {
         target_dir = target_dir.join("afl");
     }
